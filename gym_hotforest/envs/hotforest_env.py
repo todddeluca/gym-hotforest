@@ -32,19 +32,19 @@ def spark_probs(length, l_factor=10):
     '''
     scale = length / l_factor
     idxs = np.indices((length, length))
-    probs = np.exp(-1 * idxs[0] / scale) * np.exp(-1 * idxs[1] / scale)
-    return probs / np.sum(probs) # probs should sum to 1.
+    probs = np.exp(-1 * idxs[0] / scale) * np.exp(-1 * idxs[1] / scale).astype(np.float64)
+    return probs / np.sum(probs) # normalize probs so it sums to (almost) 1.0
 
 
 def board_costs(board):
     '''
-    For every position on the board, calculate the cost as number of trees 
+    For every position on the board, calculate the cost as number of trees
     which will burn if a fire starts at that position.
-    
+
     The connected components (forests) of the board are found, the size of each component is found,
     and each position in the board is annotated with the size of the component it is a member of (or 0)
     if it is empty (not a part of the component).
-    
+
     returns: costs, same shape as board. each position contains the number of trees that
     would burn if a fire started at that position.
     '''
@@ -59,9 +59,9 @@ def sample_yield(board, ps, n=None):
     '''
     Calculate the yield, which is the fraction of the board planted in trees minus the
     expected fraction of the board that will burn from a spark starting a fire
-    
+
     ps: spark probability distribution
-    n: number of samples to average over (defaults to a single sample). n > 1 means multiple sparks 
+    n: number of samples to average over (defaults to a single sample). n > 1 means multiple sparks
      will be sampled and the average yield will be returned. If n is None, the true expected spark cost
      is used.
     return: a sample yield, the percentage of the board that is planted in trees minus the percentage of
@@ -73,19 +73,19 @@ def sample_yield(board, ps, n=None):
     else:
         # light n sparks and average how many trees burn
         exp_cost = np.mean(np.random.choice(costs.ravel(), size=n, replace=True, p=ps.ravel()))
-        
-#     print('exp_cost:', exp_cost)
-    return (np.sum(board) - exp_cost) / np.product(board.shape) # yield is a fraction of board size
+
+    yld = (np.sum(board) - exp_cost) / np.product(board.shape) # yield is a fraction of board size
+    return yld
 
 
 class HotforestEnv(gym.Env):
     metadata = {'render.modes': ['human']}
 
-    def __init__(self, length=8, l_factor=10, num_yield_samples=None):
+    def __init__(self, length=4, l_factor=10, num_yield_samples=None):
         '''
         length: length of one side of the square board
         l_factor: scaling factor affecting spark probability distribution.
-        num_yield_samples: None returns true expected yield (using spark 
+        num_yield_samples: None returns true expected yield (using spark
         probability dist). An integer (e.g. 1, 20) returns a yield calculated
         from that many spark samples.
         '''
@@ -121,22 +121,24 @@ class HotforestEnv(gym.Env):
             done (boolean): whether the episode has ended, in which case further step() calls will return undefined results
             info (dict): contains auxiliary diagnostic information (helpful for debugging, and sometimes learning)
         """
+        # print('action:', action, 'board:', self.board.ravel())
         # convert 1d action (tree position) into 2d board position tuple
+        # for a 4x4 board, action 0 -> (0,0) and action 6 -> (1,2)
         tree = np.unravel_index(action, self.board.shape)
-
         # reward
-        if self.board[action] == 1:
+        if self.board[tree] == 1:
             reward = -1.0 # large negative reward for planting a tree on top of an existing tree
         else:
             # plant tree, calc reward
             self.board[tree] = 1
             reward = sample_yield(self.board, self.ps, n=self.num_yield_samples)
-        
+
         # episode is done when board is fully planted with trees
         don = np.sum(self.board) == np.product(self.board.shape)
-        
+        # print(f'reward: {reward:0.2}', 'done:', don, 'board:', self.board.ravel())
+
         return (self.board, reward, don, {})
-        
+
 
     def reset(self):
         '''
@@ -151,4 +153,3 @@ class HotforestEnv(gym.Env):
         '''
         outfile = sys.stdout
         print(self.board, file=outfile)
-
